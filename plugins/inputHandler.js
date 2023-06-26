@@ -1,7 +1,7 @@
 // root/routes/chat/plugins/inputHander.js
 "use strict";
 const fp = require("fastify-plugin");
-const { getEmbedding, getTag } = require("../../../plugins/openAI");
+const { getEmbedding, getTag } = require("./openAI");
 const fastify = require("fastify");
 
 async function embeddingHandler(request, options) {
@@ -77,8 +77,4 @@ module.exports = fp(async function (fastify, opts, done) {
   fastify.decorate("embeddingHandler", embeddingHandler);
   fastify.decorate("columnHandler", columnHandler);
   fastify.decorate("tagHandler", tagHandler);
-
-  // console.log("------------------------------------");
-  // console.log(fastify.hasDecorator("publisher"));
-  // console.log("------------------------------------");
 });

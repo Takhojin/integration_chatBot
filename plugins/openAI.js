@@ -1,4 +1,4 @@
-// root/plushins/openAI.js
+// root/plusgins/openAI.js
 const { Configuration, OpenAIApi } = require("openai");
 
 const configuration = new Configuration({
@@ -60,6 +60,7 @@ async function getTag(request, reply) {
 //답변을 출력하는 함수
 async function getResponse(request, reply) {
   const input = request;
+
   // 토큰 갯수에따라 모델명을 달리 하기
   let aiModel = "";
   aiModel = input.tokens > 4000 ? "gpt-3.5-turbo-16k" : "gpt-3.5-turbo";

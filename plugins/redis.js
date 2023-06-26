@@ -20,8 +20,8 @@ module.exports = fp(async function (fastify, opts, done) {
   fastify.decorate("subscriber", subscriber);
 
   // 채널 생성
-  await subscriber.subscribe("embedding", "column", "tag");
-  console.log("Subscribed to channels: 'embedding', 'column', 'tag'.");
+  await subscriber.subscribe("chat");
+  console.log("Subscribed to channels: 'chat'.");
 
   fastify.addHook("onClose", async () => {
     await redis.quit();

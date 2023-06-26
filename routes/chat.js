@@ -1,19 +1,12 @@
-// root/routes/chat/chat.js
 "use strict";
-const fastify = require("fastify")();
-const { getResponse } = require("../../plugins/openAI");
-const inputHandler = require("./plugins/inputHandler");
-
-fastify.register(inputHandler);
+const { getEmbedding, getResponse, getTag } = require("../plugins/openAI");
 
 module.exports = async function (fastify, opts) {
-  const redis = fastify.redis;
-
-  fastify.post("/", chat);
+  fastify.post("/chat", chat);
 
   async function chat(request, reply) {
     const { input } = request.body;
-    const subscriber = fastify.subscriber;
+
     try {
       // redis 호출
       const redis = fastify.redis;
@@ -23,48 +16,42 @@ module.exports = async function (fastify, opts) {
         const parsedResult = JSON.parse(redisResult);
         return parsedResult;
       }
-      // 임배딩 결과값 얻기
-
-      let embeddingMessage = "";
-      fastify.embeddingHandler(input, opts);
-      // 기다리지 않고 바로 설정해버리길래 promise를 이용하여 설정까지 기다리게 하기
-      await new Promise((resolve) => {
-        subscriber.on("message", (embedding, message) => {
-          embeddingMessage = JSON.parse(message);
-          resolve(); // Promise 완료를 알리기 위해 resolve()호출
-        });
+      // tag db에서 가져오기
+      const tagData = await fastify.prisma.members_documents.findMany({
+        select: { tag: true },
+        distinct: ["tag"],
       });
-      const inputEmbedding = embeddingMessage.data;
+      // tag 데이터를 넘겨주고 결과값 가져오기
+      // 만약 tag값이 여러개일 경우를 대비해서 배열로 바꿔주기
+      const tagRequest = { question: input, taggingData: tagData };
+      // where in 조건에 사용하기 위해서 '' 한번더 감싸기
+      const tagging = (await getTag(tagRequest)).map((tag) => `'${tag}'`);
 
-      let columnMessage = "";
-      fastify.columnHandler();
-      await new Promise((resolve) => {
-        subscriber.on("message", (column, message) => {
-          columnMessage = JSON.parse(message);
-          resolve();
-        });
-      });
-      const columnNamesString = columnMessage.data;
+      // 임배딩하기
+      const inputEmbedding = await getEmbedding(input);
 
-      let tagMessage = "";
-      fastify.tagHandler();
-      await new Promise((resolve) => {
-        subscriber.on("message", (column, message) => {
-          tagMessage = JSON.parse(message);
-          resolve();
-        });
-      });
-      const taggingFormat = tagMessage.data;
+      // DB에 저장된 column 뽑아오기
+      // 유지보수 측면에서 select column나열보다는 vector 들어간 열을 제외하기 위해서
+      const columnQuery = `SELECT column_name FROM information_schema.columns WHERE table_name = 'members_documents';`;
+      const columns = await fastify.prisma.$queryRaw(
+        fastify.Prisma.raw(columnQuery)
+      );
+      // 객체로 나온 결과를 하나의 배열로 묶기
+      const columnNames = columns.map((column) => column.column_name);
+      // vector가 포함된 컬럼은 제외하고 알파벳 순으로 정렬
+      const filteredColumnNames = columnNames
+        .filter((columnName) => !columnName.includes("vector"))
+        .sort();
+      // 쿼리문에 사용하기위해 스트링으로 변경
+      const columnNamesString = filteredColumnNames.join(", ");
 
       // tag목록과 embedding결과로 데이터 뽑아오기
-      const inputVector = "[" + inputEmbedding.toString() + "]";
-      let vectorQuery = `SELECT ${columnNamesString} , 1 - (contents_vector <=> '${inputVector}') as cosine_similarity FROM "members_documents" WHERE tag IN (${taggingFormat}) order by 1 - (contents_vector <=> '${inputVector}') desc limit 4 ;`;
+      const inputVector = "[" + inputEmbedding.embedding.toString() + "]";
+      let vectorQuery = `SELECT ${columnNamesString} , 1 - (contents_vector <=> '${inputVector}') as cosine_similarity FROM "members_documents" WHERE tag IN (${tagging}) order by 1 - (contents_vector <=> '${inputVector}') desc limit 4 ;`;
       let vectorResult = await fastify.prisma.$queryRaw(
         fastify.Prisma.raw(vectorQuery)
       );
-
       // 태그가 형식에 맞지 않는다면 where 조건문을 빼고 모든 데이터에서 조회
-      // let을 써도되는건가? let은 조금 위험한가?
       if (vectorResult[0] == undefined) {
         vectorQuery = `SELECT ${columnNamesString} , 1 - (contents_vector <=> '${inputVector}') as cosine_similarity FROM "members_documents"  order by 1 - (contents_vector <=> '${inputVector}') desc limit 4 ;`;
         vectorResult = await fastify.prisma.$queryRaw(
@@ -101,6 +88,7 @@ module.exports = async function (fastify, opts) {
       const totalToken = inputTokens + dataTokens;
 
       // 뽑아온 데이터로 답변 출력
+
       // gotResponse에게 전달해줄 정보들
       const resRequset = {
         question: input,
@@ -113,10 +101,11 @@ module.exports = async function (fastify, opts) {
       const response = { apiAnswer: gotRespnose };
       // 뽑아온 데이터의 배열에 push
       vectorResult.push(response);
-      // 출력
 
       //redis 서버에 저장된 값이 없다면 저장하기 만료시간 10분
       await redis.set(input, JSON.stringify(vectorResult), "EX", 600);
+
+      // 출력
       return vectorResult;
     } catch (error) {
       console.log(error);
