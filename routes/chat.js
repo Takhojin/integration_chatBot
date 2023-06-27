@@ -116,7 +116,6 @@ module.exports = async function (fastify, opts) {
       // gotResponse 함수 호출
       const answer = await fastify.getResponse(input.data);
 
-      // ticket status를 progress로 변경후 결과를 data에 저장
       const response = { apiAnswer: answer };
       // 뽑아온 데이터의 배열에 push
       input.data.resData.push(response);
