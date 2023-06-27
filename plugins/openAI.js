@@ -1,4 +1,5 @@
 // root/plusgins/openAI.js
+const fp = require("fastify-plugin");
 const { Configuration, OpenAIApi } = require("openai");
 
 const configuration = new Configuration({
@@ -17,7 +18,8 @@ async function getEmbedding(request, reply) {
     const embeddingResult = embedding.data.data[0];
     return embeddingResult;
   } catch (error) {
-    throw error;
+    console.log(error);
+    reply.code(400).send({ error: "getEmbedding" });
   }
 }
 
@@ -41,26 +43,24 @@ async function getTag(request, reply) {
       messages: [
         {
           role: "user",
-          content: `${question} 이 내용과 관련된 카테고리를 뽑아줘 \n 반드시 '${tagCondition}' \n 이 안의 내용에서 뽑아줘 \n 반드시 카테고리:예시카테고리 이런 형식으로 뽑아줘 \n 반드시 1개에서 2개 정도만 뽑아줘`,
+          content: `Please extract categories related to '${question}'. Only extract from '${tagCondition}'. Extract in the format of 'category1', 'category2' must wrapped in single quotation marks, separated by commas and so on Please extract only 1 to 2 categories.`,
         },
       ],
       temperature: 0,
     });
+
     // 태그 결과
     const response = completion.data.choices[0].message.content;
-    // 태그결과중 " 카테고리 : "를 제외한 정보 전달
-    const trimmedResponse = response.replace(/카테고리: /g, "").split(",");
-
-    return trimmedResponse;
+    return response;
   } catch (error) {
-    throw error;
+    console.log(error);
+    reply.code(400).send({ error: "getTag" });
   }
 }
 
 //답변을 출력하는 함수
 async function getResponse(request, reply) {
   const input = request;
-
   // 토큰 갯수에따라 모델명을 달리 하기
   let aiModel = "";
   aiModel = input.tokens > 4000 ? "gpt-3.5-turbo-16k" : "gpt-3.5-turbo";
@@ -87,7 +87,13 @@ async function getResponse(request, reply) {
 
     return completion.data.choices[0].message.content;
   } catch (error) {
-    throw error;
+    console.log(error);
+    reply.code(400).send({ error: "getResponse" });
   }
 }
-module.exports = { getEmbedding, getTag, getResponse };
+module.exports = fp(async function (fastify, opts, done) {
+  fastify.decorate("getEmbedding", getEmbedding);
+  fastify.decorate("getTag", getTag);
+  fastify.decorate("getResponse", getResponse);
+  done();
+});

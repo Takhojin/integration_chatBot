@@ -1,34 +1,27 @@
 "use strict";
-const { getEmbedding, getResponse, getTag } = require("../plugins/openAI");
+const { v4: uuidv4 } = require("uuid");
 
 module.exports = async function (fastify, opts) {
-  fastify.post("/chat", chat);
-
-  async function chat(request, reply) {
+  fastify.post("/chat", tagAndembed);
+  fastify.get("/chat/:id", answer);
+  async function tagAndembed(request, reply) {
     const { input } = request.body;
-
     try {
-      // redis 호출
-      const redis = fastify.redis;
-      // redis 서버에 저장되어있다면 불러와서 바로 return
-      const redisResult = await redis.get(input);
-      if (redisResult) {
-        const parsedResult = JSON.parse(redisResult);
-        return parsedResult;
-      }
       // tag db에서 가져오기
+      // tag 값이 true인 경우만 가져오기
       const tagData = await fastify.prisma.members_documents.findMany({
         select: { tag: true },
         distinct: ["tag"],
+        where: { is_tag_ok: true },
       });
       // tag 데이터를 넘겨주고 결과값 가져오기
       // 만약 tag값이 여러개일 경우를 대비해서 배열로 바꿔주기
       const tagRequest = { question: input, taggingData: tagData };
       // where in 조건에 사용하기 위해서 '' 한번더 감싸기
-      const tagging = (await getTag(tagRequest)).map((tag) => `'${tag}'`);
+      const tagging = await fastify.getTag(tagRequest);
 
       // 임배딩하기
-      const inputEmbedding = await getEmbedding(input);
+      const inputEmbedding = await fastify.getEmbedding(input);
 
       // DB에 저장된 column 뽑아오기
       // 유지보수 측면에서 select column나열보다는 vector 들어간 열을 제외하기 위해서
@@ -47,18 +40,31 @@ module.exports = async function (fastify, opts) {
 
       // tag목록과 embedding결과로 데이터 뽑아오기
       const inputVector = "[" + inputEmbedding.embedding.toString() + "]";
-      let vectorQuery = `SELECT ${columnNamesString} , 1 - (contents_vector <=> '${inputVector}') as cosine_similarity FROM "members_documents" WHERE tag IN (${tagging}) order by 1 - (contents_vector <=> '${inputVector}') desc limit 4 ;`;
+      let vectorQuery = `SELECT ${columnNamesString} , 1 - (contents_vector <=> '${inputVector}') as cosine_similarity 
+        FROM "members_documents" 
+        WHERE tag IN (${tagging}) 
+         AND is_summary_1_ok = true
+         AND is_tag_ok = true
+         AND is_similar_vector_exists = false 
+        order by 1 - (contents_vector <=> '${inputVector}') 
+        desc limit 4 ;`;
       let vectorResult = await fastify.prisma.$queryRaw(
         fastify.Prisma.raw(vectorQuery)
       );
+
       // 태그가 형식에 맞지 않는다면 where 조건문을 빼고 모든 데이터에서 조회
       if (vectorResult[0] == undefined) {
-        vectorQuery = `SELECT ${columnNamesString} , 1 - (contents_vector <=> '${inputVector}') as cosine_similarity FROM "members_documents"  order by 1 - (contents_vector <=> '${inputVector}') desc limit 4 ;`;
+        vectorQuery = `SELECT ${columnNamesString} , 1 - (contents_vector <=> '${inputVector}') as cosine_similarity
+        FROM "members_documents" 
+        WHERE is_summary_1_ok = true
+          AND is_tag_ok = true
+          AND is_similar_vector_exists = false  
+        order by 1 - (contents_vector <=> '${inputVector}')
+        desc limit 4 ;`;
         vectorResult = await fastify.prisma.$queryRaw(
           fastify.Prisma.raw(vectorQuery)
         );
       }
-
       // gpt 모델 토큰으로 나누는 분기점 생성
 
       // 가져온 데이터의 토큰수의 합
@@ -86,30 +92,40 @@ module.exports = async function (fastify, opts) {
       const inputTokens = fastify.tokens(input);
       // 총 토큰수 계산
       const totalToken = inputTokens + dataTokens;
-
-      // 뽑아온 데이터로 답변 출력
-
-      // gotResponse에게 전달해줄 정보들
-      const resRequset = {
+      // 답변도출하는데 필요한 정보들
+      const resRequest = {
         question: input,
         resData: vectorResult,
         tokens: totalToken,
       };
-      // gotResponse 함수 호출
-      const gotRespnose = await getResponse(resRequset);
-      // gotResponse 함수 결과값을 객체로 저장
-      const response = { apiAnswer: gotRespnose };
-      // 뽑아온 데이터의 배열에 push
-      vectorResult.push(response);
-
-      //redis 서버에 저장된 값이 없다면 저장하기 만료시간 10분
-      await redis.set(input, JSON.stringify(vectorResult), "EX", 600);
-
-      // 출력
-      return vectorResult;
+      // ticket 발급
+      const ticketId = uuidv4();
+      const ticketData = { data: resRequest };
+      await fastify.createTicket(ticketId, ticketData);
+      reply.send({ ticketId });
     } catch (error) {
       console.log(error);
-      reply.code(400).send({ error: "chat" });
+      reply.code(400).send({ error: "tagAndembed" });
+    }
+  }
+  async function answer(request, reply) {
+    const uuid = request.params.id;
+    try {
+      const input = await fastify.getTicketStatus(uuid);
+
+      // gotResponse 함수 호출
+      const answer = await fastify.getResponse(input.data);
+
+      // ticket status를 progress로 변경후 결과를 data에 저장
+      const response = { apiAnswer: answer };
+      // 뽑아온 데이터의 배열에 push
+      input.data.resData.push(response);
+      fastify.completeTicket(uuid);
+      // 출력
+      return input.data.resData;
+    } catch (error) {
+      console.log(error);
+      reply.code(400).send({ error: "answer" });
     }
   }
 };

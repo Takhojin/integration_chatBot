@@ -12,21 +12,54 @@ module.exports = fp(async function (fastify, opts, done) {
     legacyMode: true,
   };
   const redis = new Redis(redisConfig);
-  const publisher = new Redis(redisConfig);
-  const subscriber = new Redis(redisConfig);
+
+  // 작업 티켓 생성 함수
+  function createTicket(ticketId, data) {
+    return new Promise((resolve, reject) => {
+      // Redis에 티켓 정보 저장
+      // 10분뒤 자동파기 (answer에서 오류가 나거나 해서 사용되지않는다면)
+      redis.set(ticketId, JSON.stringify(data), "EX", 600, (err) => {
+        if (err) {
+          reject(err);
+        } else {
+          resolve();
+        }
+      });
+    });
+  }
+
+  // 작업 상태 조회 함수
+  function getTicketStatus(ticketId) {
+    return new Promise((resolve, reject) => {
+      // Redis에서 티켓 정보 가져오기
+      redis.get(ticketId, (err, data) => {
+        if (err) {
+          reject(err);
+        } else {
+          resolve(JSON.parse(data));
+        }
+      });
+    });
+  }
+
+  // 작업 완료 함수
+  function completeTicket(ticketId, result) {
+    return new Promise((resolve, reject) => {
+      // Redis에서 티켓 정보 제거
+      redis.del(ticketId, (err) => {
+        if (err) {
+          reject(err);
+        } else {
+          resolve(result);
+        }
+      });
+    });
+  }
 
   fastify.decorate("redis", redis);
-  fastify.decorate("publisher", publisher);
-  fastify.decorate("subscriber", subscriber);
+  fastify.decorate("createTicket", createTicket);
+  fastify.decorate("getTicketStatus", getTicketStatus);
+  fastify.decorate("completeTicket", completeTicket);
 
-  // 채널 생성
-  await subscriber.subscribe("chat");
-  console.log("Subscribed to channels: 'chat'.");
-
-  fastify.addHook("onClose", async () => {
-    await redis.quit();
-    await publisher.quit();
-    await subscriber.quit();
-  });
   done();
 });

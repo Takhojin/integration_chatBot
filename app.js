@@ -4,9 +4,6 @@
 const path = require("path");
 const fastifyCors = require("@fastify/cors");
 const Fastify = require("fastify");
-const fastify = Fastify({ logger: true });
-
-const fastifySensible = require("@fastify/sensible");
 const AutoLoad = require("@fastify/autoload");
 
 // Pass --options via CLI arguments in command to enable these options.
