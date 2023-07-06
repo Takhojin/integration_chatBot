@@ -1,11 +1,10 @@
-//root/plugins/prisma.js
+// root/plugins/prisma.js
 "use strict";
 
 const fp = require("fastify-plugin");
-const { Prisma, PrismaClient } = require("@prisma/client");
-const prisma = new PrismaClient();
+const { PrismaClient } = require("@prisma/client");
 
 module.exports = fp(async function (fastify, opts, done) {
+  const prisma = new PrismaClient();
   fastify.decorate("prisma", prisma);
-  fastify.decorate("Prisma", Prisma);
 });
