@@ -1,0 +1,37 @@
+// This is your Prisma schema file,
+// learn more about it in the docs: https://pris.ly/d/prisma-schema
+
+generator client {
+  provider        = "prisma-client-js"
+  previewFeatures = ["postgresqlExtensions"]
+}
+
+datasource db {
+  provider   = "postgresql"
+  url        = env("DATABASE_URL")
+  extensions = [vector(schema: "public")]
+}
+ 
+model members_documents {
+  id                       String                 @id @default(cuid())
+  title                    String?
+  subtitle                 String?
+  contents                 String?
+  summary_1                String?
+  summary_2                String?
+  keywords                 String?
+  tag                      String?
+  url                      String?
+  source                   String?
+  contents_tokens          Int?
+  summary_1_tokens         Int?
+  summary_2_tokens         Int?
+  created_at               DateTime               @default(now())
+  updated_at               DateTime               @updatedAt
+  contents_vector          Unsupported("vector")?
+  summary_1_vector         Unsupported("vector")?
+  summary_2_vector         Unsupported("vector")?
+  is_summary_1_ok          Boolean?               @default(false)
+  is_tag_ok                Boolean?               @default(false)
+  is_similar_vector_exists Boolean?               @default(false)
+}
